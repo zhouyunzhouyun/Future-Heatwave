@@ -1,0 +1,103 @@
+var    world = ee.FeatureCollection("users/tensorflow/continent_polygons");
+var    table = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017");
+var　　China = ee.FeatureCollection(table).filterMetadata('country_na','equals','China');
+
+var geometry= China.geometry();
+
+var era5Land = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY").select('temperature_2m')
+
+// 定义起始年份和结束年份
+var startYear = 1971;
+var endYear = 2000;
+
+// 定义一个函数来处理每年的数据
+function processYear(year) {
+  var startDate = ee.Date.fromYMD(year, 5, 1);
+  var endDate = ee.Date.fromYMD(year, 10, 1);
+
+  // 修改函数名称为dailyMinMaxTemperature，并计算每天的最低气温
+  function dailyMinMaxTemperature(date) {
+    date = ee.Date(date);
+    var nextDate = date.advance(1, 'day');
+    // 根据输入的日期范围筛选数据
+    var filtered = era5Land.filterDate(date, nextDate);
+
+    // 将开尔文转换为摄氏度
+    var toCelsius = function(image) {
+      return image.subtract(273.15).copyProperties(image, ['system:time_start']);
+    };
+
+    // 将数据集中的所有图像转换为摄氏度
+    var celsius = filtered.map(toCelsius);
+
+    // 计算每天的最高和最低气温
+    var dailyMeanTemp = celsius.reduce(ee.Reducer.mean());
+    // var dailyMinTemp = celsius.reduce(ee.Reducer.min());
+
+    // 将最低气温添加为一个新的波段
+    return dailyMeanTemp.set('system:time_start', date);
+  } 
+
+  // 计算日期之间的天数
+  var daysDifference = endDate.difference(startDate, 'days');
+ 
+  // 生成一个包含每天日期的序列
+  var dateSequence = ee.List.sequence(0, daysDifference.subtract(1)).map(function(day) {
+    return startDate.advance(day, 'day');
+  });
+
+  // 对每个日期应用 dailyMinMaxTemperature 函数
+  return ee.ImageCollection.fromImages(dateSequence.map(dailyMinMaxTemperature));
+}
+
+
+
+
+// 生成一个包含每年的序列
+var yearSequence = ee.List.sequence(startYear, endYear);
+
+// 对每年应用 processYear 函数，并将所有年份的数据合并成一个图像集合
+var yearlyDailyMinMaxTemps = ee.ImageCollection(yearSequence.iterate(function(year, prev) {
+  return ee.ImageCollection(prev).merge(processYear(year));
+}, ee.ImageCollection([])));
+
+print("yearlyDailyMinMaxTemps", yearlyDailyMinMaxTemps);
+
+  // reference period of era5 30years
+  var  TMP95  = ee.ImageCollection(yearlyDailyMinMaxTemps)
+              // .filterDate('1961-01-01','1999-12-31')
+              .select('temperature_2m_mean').reduce(ee.Reducer.percentile([95]));  
+
+
+
+  var visualization = {
+    // bands: ['temperature_2m'],
+    min: -10.0,
+    max: 30.0,
+    palette: [
+      "#000080","#0000D9","#4000FF","#8000FF","#0080FF","#00FFFF",
+      "#00FF80","#80FF00","#DAFF00","#FFFF00","#FFF500","#FFDA00",
+      "#FFB000","#FFA400","#FF4F00","#FF2500","#FF0A00","#FF00FF",
+    ]
+  };
+  Map.setCenter(105.2, 30.4, 2);
+  Map.addLayer(TMP95.clip(geometry), visualization, "Air temperature [C] at 2m height");  
+
+
+  function export_img(img, folder, task){
+      Export.image.toAsset({
+            image : img,
+            description: task,
+            assetId: folder.concat('/').concat(task),
+            //range: [-0.125, -90.125, 179.875, 90.125],
+            //dimensions:"1440x721",
+            crs:"EPSG:4326",
+            scale: 11132,
+            region:geometry.bounds(),
+            //crsTransform: [0.25, 0, -180, 0, -0.25, 89.875],
+            maxPixels: 1e13
+      });
+  }
+  
+
+export_img(TMP95, 'History_HW', "TMP95");
