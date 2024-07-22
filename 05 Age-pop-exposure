@@ -1,0 +1,130 @@
+var image = ee.Image("projects/heatwave0214/assets/History_HW/TMP95")
+
+var geometry =ee.FeatureCollection("projects/heatwave0214/assets/basicpolygon/Chinaregion_NOTW")
+// .filter(ee.Filter.eq('zone', 'Central China'))
+.geometry();
+ 
+ 
+var i;
+for (i = 2041; i < 2101; i++) {
+ 
+ 
+// var i = 2001
+var heatwave_days = functocol(i)
+// print("heatwave_days",heatwave_days)
+ 
+function functocol(year){
+    // Original string 
+    var str = 'projects/heatwave0214/assets/TM_SSP245_HWF/Interpolation_TM_SSP245_HWF_';
+    // Joining the strings together
+    var stryear   = year.toString();
+    var asset = str.concat(stryear); //image name string
+    var img1 = ee.Image(asset).clip(geometry);
+    return img1
+}
+
+
+function functoimage(year){
+    var str = 'projects/heatwave0214/assets/future_agingpop_SSP2/ssp2_11km_agingrate_';
+    // Joining the strings together
+    var stryear   = year.toString();
+    var asset = str.concat(stryear); //image name string
+    var img2 = ee.Image(asset).multiply(0.01);
+    // print("age_rate",img2)
+    return img2
+}
+
+var aging_rate = functoimage(i)
+// print("aging_rate",aging_rate)
+
+ var resampled_aging_rate = aging_rate.reduceResolution({
+    reducer: ee.Reducer.mean(),
+    maxPixels: 10000
+  }).reproject({
+    crs: image.projection(),
+    scale: 11132
+  });
+  
+
+
+var data = resampled_aging_rate.rename('agerate');
+var img = heatwave_days.addBands(data);
+// print("img",img)
+
+function functopopimage(year){
+    var str = 'projects/heatwave0214/assets/futurepopulation_SSP1_RCP4_5/grid_pop_count';
+    // Joining the strings together
+    var stryear   = year.toString();
+    var asset = str.concat(stryear).concat("_SSP2_RCP4_5"); //image name string
+    var img3 = ee.Image(asset);
+    // print("age_rate",img2)
+    return img3
+}
+
+var pop = functopopimage(i)
+
+
+// print("pop",pop)
+
+// var data1 = pop.rename('pop');
+
+  var resampled_pop = pop.reduceResolution({
+    reducer: ee.Reducer.sum(),
+    maxPixels: 10000
+  }).reproject({
+    crs: image.projection(),
+    scale: 11132
+  });
+  
+  // Map.addLayer(resampled_pop,singleBandVis,"resampled_pop")
+  // print("resampled_pop",resampled_pop)
+  
+  var data1 = resampled_pop.rename('pop');
+
+
+
+var img2 = img.addBands(data1);
+print("img2",img2)
+
+
+function exposure(img){
+  var heatwave = img.select(["HWF","agerate","pop"])
+      heatwave = heatwave.expression(
+      'HN*agerate*pop', {
+      'HN':heatwave.select(["HWF"]),
+      'agerate':heatwave.select(["agerate"]),
+      "pop":heatwave.select(["pop"])
+    }).rename("age_exposure")
+  return img.addBands(heatwave)}
+
+var exposure1 = exposure(img2)
+
+  
+function agepop(img){ 
+  var heatwave = img.select(["agerate","pop"])
+      heatwave = heatwave.expression(
+      'agerate*pop', {
+      'agerate':heatwave.select(["agerate"]),
+      "pop":heatwave.select(["pop"])
+    }).rename("age_pop")
+  return img.addBands(heatwave)}
+
+var exposure2 =agepop(exposure1).set("system:time_start",ee.Date(i.toString().concat('-01-01')))
+
+print("exposure2",exposure2)
+Map.addLayer(exposure1, {}, 'Population exposure in 2000');
+
+  var task = 'Interpolation_agepop_exposure_TM_SSP245_withoutsum_'+i.toString()
+  var folder = 'projects/heatwave0214/assets/Age_pop_exposure_TM_SSP245'
+  Export.image.toAsset({
+    image: exposure2,
+    description: task,
+    assetId:folder.concat('/').concat(task),
+    region: geometry,
+    scale: 11132,
+    crs:  'EPSG:4326'
+  })  
+  
+}
+
+
