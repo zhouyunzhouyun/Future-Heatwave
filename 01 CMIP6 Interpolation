@@ -1,0 +1,83 @@
+var geometry =ee.FeatureCollection("projects/heatwave0214/assets/basicpolygon/Chinaregion_NOTW").geometry();
+
+var i;
+for (i = 2044; i < 2101; i++) {
+    
+  var stryear  = i.toString();
+  var startDate = stryear.concat('-05-01');
+  var startDate = ee.Date(startDate); 
+  var endDate   = startDate.advance(5,'month');
+    
+  var dateList = ee.List.sequence(0, endDate.difference(startDate, 'day').subtract(1)).map(function(day){
+    return startDate.advance(day, 'day').format('YYYY-MM-dd'); 
+  });
+  
+  function dailyDownscaleProcess(date) {
+  
+      var diff_5 = ee.Image("projects/heatwave0214/assets/History_HW/diff_05");
+      var diff_6 = ee.Image("projects/heatwave0214/assets/History_HW/diff_06");
+      var diff_7 = ee.Image("projects/heatwave0214/assets/History_HW/diff_07");
+      var diff_8 = ee.Image("projects/heatwave0214/assets/History_HW/diff_08");
+      var diff_9 = ee.Image("projects/heatwave0214/assets/History_HW/diff_09");
+      
+      var cmip6 = ee.ImageCollection("NASA/GDDP-CMIP6");
+      var filtered = cmip6.filter(ee.Filter.eq('scenario', 'ssp245')).select('tas');
+      
+      var dateRange = ee.DateRange(date, ee.Date(date).advance(1, 'day'));
+      var selectedImages = filtered.filterDate(dateRange);
+      var dailyAverage = selectedImages.mean().subtract(273.15);
+
+      function reSampleFun(image, scale) {
+        var reSampleImg = image.resample('bilinear').reproject({
+                                  crs:'EPSG:4326',
+                                  scale:scale
+                                });
+        return reSampleImg;
+      }
+      
+      var img_10km = reSampleFun(dailyAverage, 11132);
+      var TX_10km = img_10km.rename('TM_10km');
+
+      // Extract the month from the date
+      var month = ee.Date(date).get('month');
+      var correction;
+      
+      // Select the appropriate correction factor based on the month
+      correction = ee.Algorithms.If(ee.Number(month).eq(5), diff_5,
+                    ee.Algorithms.If(ee.Number(month).eq(6), diff_6,
+                    ee.Algorithms.If(ee.Number(month).eq(7), diff_7,
+                    ee.Algorithms.If(ee.Number(month).eq(8), diff_8,
+                    ee.Algorithms.If(ee.Number(month).eq(9), diff_9, ee.Image(0))))));
+      
+      var TX_10km_corrected = TX_10km.add(ee.Image(correction)).rename("TM_10km_corrected");
+
+      return ee.Image(TX_10km_corrected).set('system:time_start', date); 
+  }
+  
+  function strcon(x) {
+    return ee.String('TM_10km_').cat(ee.Date(x).format('YYYY_MM_dd'));
+  }
+  
+  var downscaleImageCollection = ee.ImageCollection.fromImages(dateList.map(function(date){
+    return dailyDownscaleProcess(date);
+  }));
+  
+  function export_img(img, folder, task){
+        Export.image.toAsset({
+              image : img,
+              description: task,
+              assetId: folder.concat('/').concat(task),
+              crs:"EPSG:4326",
+              scale: 11132,
+              region: geometry.bounds(),
+              maxPixels: 1e13
+        });
+  }
+    
+  var img_out = downscaleImageCollection.toArray();
+  var ids = ee.List(downscaleImageCollection.aggregate_array('system:time_start')).map(strcon);
+  img_out = img_out.arraySlice(1, -1).arrayProject([0]).arrayFlatten([ids]); //convert into image;
+  
+  var outstr = 'Merged_SSP245_TM_10km_interpolation_' + i.toString();
+  export_img(img_out, 'SSP245_TM_10km_China', outstr);
+}
