@@ -1,0 +1,142 @@
+var geometry = ee.FeatureCollection("projects/heatwave0214/assets/basicpolygon/Chinaregion_NOTW").geometry();
+
+// 加载数据集
+var era5 = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").filterBounds(geometry);
+var cmip6 = ee.ImageCollection("NASA/GDDP-CMIP6").filterBounds(geometry);
+
+// 定义时间范围
+var startDate = '1971-05-01';
+var endDate = '2000-09-30';
+
+// 筛选时间范围内的数据
+var era5_filtered = era5.filterDate(startDate, endDate).select('temperature_2m');
+var cmip6_filtered = cmip6.filter(ee.Filter.eq('scenario', 'historical'))
+                           .filterDate(startDate, endDate)
+                           .select('tas');
+
+// 计算1971-2000年间各月份的ERA5和CMIP6的平均气温
+var calculateMonthlyMean = function(collection, startYear, endYear, month, daysInMonth) {
+  var start = ee.Date.fromYMD(startYear, month, 1);
+  var end = ee.Date.fromYMD(endYear, month, daysInMonth);
+  return collection.filterDate(start, end).mean().clip(geometry); // 转换为摄氏度
+};
+
+// 计算ERA5和CMIP6每月平均值
+var era5_may_mean = calculateMonthlyMean(era5_filtered, 1971, 2000, 5, 31).rename('tas');
+var era5_june_mean = calculateMonthlyMean(era5_filtered, 1971, 2000, 6, 30).rename('tas');
+var era5_july_mean = calculateMonthlyMean(era5_filtered, 1971, 2000, 7, 31).rename('tas');
+var era5_august_mean = calculateMonthlyMean(era5_filtered, 1971, 2000, 8, 31).rename('tas');
+var era5_september_mean = calculateMonthlyMean(era5_filtered, 1971, 2000, 9, 30).rename('tas');
+
+// print("era5_may_mean",era5_may_mean)
+
+var visualization1 = {
+  bands: ['tas'],
+  min: -10.0,
+  max: 300.0,
+  palette: [
+    '000080', '0000d9', '4000ff', '8000ff', '0080ff', '00ffff',
+    '00ff80', '80ff00', 'daff00', 'ffff00', 'fff500', 'ffda00',
+    'ffb000', 'ffa400', 'ff4f00', 'ff2500', 'ff0a00', 'ff00ff',
+  ]
+};
+
+// Map.addLayer(era5_may_mean, visualization1, 'era5_may_mean');
+
+var cmip6_may_mean = calculateMonthlyMean(cmip6_filtered, 1971, 2000, 5, 31).rename('tas');
+var cmip6_june_mean = calculateMonthlyMean(cmip6_filtered, 1971, 2000, 6, 30).rename('tas');
+var cmip6_july_mean = calculateMonthlyMean(cmip6_filtered, 1971, 2000, 7, 31).rename('tas');
+var cmip6_august_mean = calculateMonthlyMean(cmip6_filtered, 1971, 2000, 8, 31).rename('tas');
+var cmip6_september_mean = calculateMonthlyMean(cmip6_filtered, 1971, 2000, 9, 30).rename('tas');
+
+// print("cmip6_may_mean",cmip6_may_mean)
+
+var visualization1 = {
+  bands: ['tas'],
+  min: -10.0,
+  max: 300.0,
+  palette: [
+    '000080', '0000d9', '4000ff', '8000ff', '0080ff', '00ffff',
+    '00ff80', '80ff00', 'daff00', 'ffff00', 'fff500', 'ffda00',
+    'ffb000', 'ffa400', 'ff4f00', 'ff2500', 'ff0a00', 'ff00ff',
+  ]
+};
+
+// Map.addLayer(cmip6_may_mean, visualization1, 'cmip6_may_mean');
+
+
+
+// 计算每月的差值（ERA5 - CMIP6）
+var may_diff = era5_may_mean.subtract(cmip6_may_mean).set('month', 'May');
+var june_diff = era5_june_mean.subtract(cmip6_june_mean).set('month', 'June');
+var july_diff = era5_july_mean.subtract(cmip6_july_mean).set('month', 'July');
+var august_diff = era5_august_mean.subtract(cmip6_august_mean).set('month', 'August');
+var september_diff = era5_september_mean.subtract(cmip6_september_mean).set('month', 'September');
+
+print("may_diff",may_diff)
+
+var visualization = {
+  bands: ['tas'],
+  min: -17.0,
+  max: 10.0,
+  palette: [
+    '000080', '0000d9', '4000ff', '8000ff', '0080ff', '00ffff',
+    '00ff80', '80ff00', 'daff00', 'ffff00', 'fff500', 'ffda00',
+    'ffb000', 'ffa400', 'ff4f00', 'ff2500', 'ff0a00', 'ff00ff',
+  ]
+};
+
+Map.setCenter(122.2, 21.2, 3);
+
+Map.addLayer(image, visualization, 'may_diff');
+
+// 创建包含所有月份差值的ImageCollection
+// var monthly_diff_collection = ee.ImageCollection([may_diff, june_diff, july_diff, august_diff, september_diff]);
+
+// 打印以调试
+// print("Monthly Difference Collection", monthly_diff_collection);
+
+// // 显示结果
+// var visParams = {min: -5, max: 5, palette: ['blue', 'white', 'red']};
+// Map.centerObject(geometry, 6);
+// Map.addLayer(may_diff.clip(geometry), visParams, 'Difference May');
+// Map.addLayer(june_diff.clip(geometry), visParams, 'Difference June');
+// Map.addLayer(july_diff.clip(geometry), visParams, 'Difference July');
+// Map.addLayer(august_diff.clip(geometry), visParams, 'Difference August');
+// Map.addLayer(september_diff.clip(geometry), visParams, 'Difference September');
+// export_img(may_diff, "projects/heatwave0214/assets/History_HW", "diff_05");
+// export_img(june_diff, "projects/heatwave0214/assets/History_HW", "diff_06");
+// export_img(july_diff, "projects/heatwave0214/assets/History_HW", "diff_07");
+// export_img(august_diff, "projects/heatwave0214/assets/History_HW", "diff_08");
+// export_img(september_diff, "projects/heatwave0214/assets/History_HW", "diff_09");
+
+
+//     function export_img(img, folder, task){
+//         Export.image.toAsset({
+//               image : img,
+//               description: task,
+//               assetId: folder.concat('/').concat(task),
+//               //range: [-0.125, -90.125, 179.875, 90.125],
+//               //dimensions:"1440x721",
+//               crs:"EPSG:4326",
+//               scale: 11132,
+//               region:geometry.bounds(),
+//               //crsTransform: [0.25, 0, -180, 0, -0.25, 89.875],
+//               maxPixels: 1e13
+//         });
+//     }
+    
+function exportImage(image, region, fileName) {
+  Export.image.toDrive({
+    image: image,
+    description: fileName, 
+    folder: "futureheatwave-batch-change3",
+    scale: 11132,
+    region: geometry.bounds(),
+    maxPixels: 1e13,
+    crs: "EPSG:4326"
+  });
+
+}
+
+// exportImage(cmip6_may_mean, geometry.bounds(), "cmip6_may_mean");
