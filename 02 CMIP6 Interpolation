@@ -1,0 +1,210 @@
+ 
+
+var geometry =ee.FeatureCollection("projects/heatwave0214/assets/basicpolygon/Chinaregion_NOTW")
+// .filter(ee.Filter.eq('zone', 'Central China'))
+.geometry();
+ 
+
+// var geometry =ee.FeatureCollection("users/yunswu/studyarea/China_withoutGAT").filter(ee.Filter.eq('Name', 'Shanghai')) 
+//                 .geometry();
+var i;
+for (i = 2041; i < 2042; i++) {
+    
+  // var i = 2030
+  var stryear  = i.toString();
+  var startDate = stryear.concat('-05-01');
+  var startDate = ee.Date(startDate); 
+  var endDate   = startDate.advance(5,'month');
+    
+    
+  // // 定义日期范围
+  // var startDate = ee.Date('2022-05-01');
+  // var endDate = ee.Date('2022-05-02');
+   
+  // 生成日期列表
+  var dateList = ee.List.sequence(0, endDate.difference(startDate, 'day').subtract(1)).map(function(day){
+    return startDate.advance(day, 'day').format('YYYY-MM-dd');
+  });
+  
+  // 例如，您已经有了一个处理单日数据的函数dailyDownscaleProcess
+  
+  function dailyDownscaleProcess(date) {
+  
+      // 定义一个ImageCollection，包含NASA/GDDP-CMIP6数据集
+      var cmip6 = ee.ImageCollection("NASA/GDDP-CMIP6");
+      
+      // 排除的模型列表
+      // var excludedModels = ['CESM2', 'CESM2-WACCM', 'IITM-ESM', 'TaiESM1'];
+      
+      // 筛选条件：波段为tasmax、scenario为ssp245
+      var filtered = cmip6.filter(ee.Filter.eq('scenario', 'ssp245'))
+                          .select('tas');
+     
+      // 使用映射函数进一步筛选，排除特定模型
+      // var filteredAndExcluded = filtered.filter(ee.Filter.inList('model', excludedModels).not());
+      
+      // 定义一个特定的日期，格式为YYYY-MM-DD
+      // var date = '2022-08-09';
+      
+      // 创建一个日期范围，此处选择了特定日期的起始和结束（2030年5月1日）
+      var dateRange = ee.DateRange(date, ee.Date(date).advance(1, 'day'));
+      
+      // 根据日期范围进一步筛选ImageCollection
+      var selectedImages = filtered.filterDate(dateRange);
+      
+      // 计算选定日期的平均值
+      var dailyAverage = selectedImages.mean().subtract(273.15).clip(geometry);
+  
+      var SRTM = ee.Image('CGIAR/SRTM90_V4').select('elevation').clip(geometry);
+      
+      var hurs_excludedModels = ['BCC-CSM2-MR', 'NESM3', 'KIOST-ESM' ];
+      
+      var hurs = ee.ImageCollection('NASA/GDDP-CMIP6').filterDate(dateRange)
+                      .select(['hurs']).filter(ee.Filter.eq('scenario', 'ssp245'))
+                      .filter(ee.Filter.inList('model', hurs_excludedModels).not())
+                      .mean().clip(geometry);
+      
+      
+      var sfcWind = ee.ImageCollection('NASA/GDDP-CMIP6').filterDate(dateRange)
+                      .select(['sfcWind']).filter(ee.Filter.eq('scenario', 'ssp245'))
+                       .mean().clip(geometry);
+      
+      
+      var pr = ee.ImageCollection('NASA/GDDP-CMIP6').filterDate(dateRange)
+                      .select(['pr']).filter(ee.Filter.eq('scenario', 'ssp245'))
+                       .mean().clip(geometry);
+      
+      var rlds = ee.ImageCollection('NASA/GDDP-CMIP6').filterDate(dateRange)
+                      .select(['rlds']).filter(ee.Filter.eq('scenario', 'ssp245'))
+                      .mean().clip(geometry);
+         
+        
+      var rsds = ee.ImageCollection('NASA/GDDP-CMIP6').filterDate(dateRange)
+                      .select(['rsds']).filter(ee.Filter.eq('scenario', 'ssp245'))
+                      .mean().clip(geometry);
+      
+      var yearIntervalStart = 5 * Math.floor((i - 2030) / 5) + 2030;
+      var LULCPath = "projects/heatwave0214/assets/global_Landcover_SSP2_RCP4_5/global_SSP2_RCP45_" + yearIntervalStart;
+      var LULC = ee.Image(LULCPath).rename("LULC").clip(geometry); 
+      // print("LULC",LULC)
+    
+    
+      // var LULC = ee.Image("projects/heatwave0214/assets/global_Landcover_SSP2_RCP4_5/global_SSP2_RCP45_2030").rename("LULC").clip(geometry)
+      
+      var name = "projects/heatwave0214/assets/futurepopulation_SSP1_RCP4_5/grid_pop_count" +i.toString()+ "_SSP2_RCP4_5"
+      
+      var POP = ee.Image(name).rename("POP")                      
+      // print("pop",POP)
+      
+      
+      var img_Original = dailyAverage.addBands(SRTM).addBands(hurs).addBands(sfcWind).addBands(pr).addBands(rlds).addBands(rsds).addBands(LULC).addBands(POP);
+      // print("img_Original",img_Original)
+      
+      // resample image
+      function reSampleFun(image,scale){
+        var dst_crs = image.select('blue').projection().crs();
+        var reSampleImg = image //.resample('bilinear') // bilinear bicubic
+                                .reproject({
+                                  crs:'EPSG:4326', //
+                                  scale:scale
+                                });
+        return reSampleImg;
+      }
+      
+      var img_100km = reSampleFun(img_Original,111319);
+      var img_10km = reSampleFun(img_Original,11132);
+      
+      var randomPoint = ee.FeatureCollection.randomPoints({
+        region:geometry,
+        // crs:'EPSG:4326',
+        points:5000,
+        seed: 1  // 可以指定种子以获得可重复的结果
+      });
+      
+      var SamplePointCol =  img_100km.sampleRegions({
+        collection: randomPoint, 
+        // properties: ['agbValue','植被类'],
+        scale: 100,
+        
+        tileScale: 2,
+        geometries:true
+      });
+      print("SamplePointCol",SamplePointCol.limit(100));
+      
+      var classifierOfChoice = ee.Classifier.smileRandomForest(500).setOutputMode('REGRESSION');
+      var propertyToPredictAsString = 'tas';
+      
+      var bandFeature = ee.List(img_100km.bandNames()).remove('tas');
+      
+      print("bandFeature",bandFeature)
+      var trainedModel = classifierOfChoice.train({
+            features: SamplePointCol,
+            inputProperties: bandFeature,
+            classProperty: propertyToPredictAsString
+          });
+      
+      
+          
+      var TX_100km = img_100km.select(bandFeature)
+                         .classify(trainedModel)
+                         .rename('TM_100km').clip(geometry);
+      
+      var TXError = img_100km.select("tas").subtract(TX_100km.select("TM_100km"));
+      
+      // Define a gaussian kernel
+      var gaussian = ee.Kernel.gaussian({radius: 1.5, units: 'pixels'});
+      
+      var TXError_gaussian = TXError.resample("bicubic").convolve(gaussian); 
+      
+      // var TXError_1km = reSampleFun(TXError,1000);
+      var TXError_10km = reSampleFun(TXError_gaussian,11132);
+      
+      
+      var TX_10km = img_10km.select(bandFeature)
+                         .classify(trainedModel)
+                         .rename('TM_10km').clip(geometry);                   
+      var TX_10km_corrected  = TX_10km.select("TM_10km").add(TXError_10km).rename("TM_10km_corrected")                   
+  
+    return ee.Image(TX_10km_corrected).set('system:time_start', date); // 请用实际处理逻辑替换
+  }
+  
+  // var downscaleImageCollection = dateList.map(function(date){
+  //   return dailyDownscaleProcess(date);
+  // });
+  
+  function strcon(x) {
+    return ee.String('TM_10km_').cat(ee.Date(x).format('YYYY_MM_dd'));
+    }
+  
+  // 对每个日期应用降尺度处理
+  var downscaleImageCollection = ee.ImageCollection.fromImages(dateList.map(function(date){
+    return dailyDownscaleProcess(date);
+  }));
+  
+  // 打印结果检查
+  // print(downscaleImageCollection);
+  
+    function export_img(img, folder, task){
+        Export.image.toAsset({
+              image : img,
+              description: task,
+              assetId: folder.concat('/').concat(task),
+              //range: [-0.125, -90.125, 179.875, 90.125],
+              //dimensions:"1440x721",
+              crs:"EPSG:4326",
+              scale: 11132,
+              region:geometry.bounds(),
+              //crsTransform: [0.25, 0, -180, 0, -0.25, 89.875],
+              maxPixels: 1e13
+        });
+    }
+    
+  
+  var img_out = downscaleImageCollection.toArray();
+  var ids = ee.List(downscaleImageCollection.aggregate_array('system:time_start')).map(strcon);
+  var  img_out = img_out.arraySlice(1, -1).arrayProject([0]).arrayFlatten([ids]);//convert into image;
+    // print("img_out",img_out)
+    var outstr = 'Merged_SSP245_TM_10km_China_'+i.toString();
+    export_img(img_out,'SSP245_TM_10km_China', outstr);
+}
+             
